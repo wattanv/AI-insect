@@ -32,6 +32,7 @@ LOCATION_DATA = {
         "หม้อปั่น": ["NO1 ห้องตะแกรงโยก"]
     }
 }
+EXCEL_FILENAME = "insect_analysis_history.xlsx"
 
 @st.cache_resource
 def load_insect_model():
@@ -56,8 +57,7 @@ st.markdown(
     ">
         AI Insect Count
     </div>
-    """,
-    unsafe_allow_html=True
+    """, unsafe_allow_html=True
 )
 st.markdown("""
 <style>
@@ -111,8 +111,8 @@ with col_left:
 
 if analysis_button:
     st.session_state.analysis_results = None
-    st.session_state.excel_data_to_download = None 
-
+    st.session_state.excel_data_to_download = None
+    
     if not all([st.session_state.factory, st.session_state.department, st.session_state.location]):
         st.warning("⚠️ กรุณากรอกข้อมูล โรงงาน, หน่วยงาน, และพื้นที่ติดตั้งให้ครบถ้วน")
     elif uploaded_image is None:
@@ -134,13 +134,13 @@ if analysis_button:
                 image_cv2 = cv2.cvtColor(np.array(image_pil), cv2.COLOR_RGB2BGR)
                 for pred in predictions:
                     x, y, w, h = int(pred['x']), int(pred['y']), int(pred['width']), int(pred['height'])
-                    x1, y1, x2, y2 = x-w//2, y-h//2, x+w//2, y+h//2
+                    x1, y1, x2, y2 = x - w // 2, y - h // 2, x + w // 2, y + h // 2
                     cv2.rectangle(image_cv2, (x1, y1), (x2, y2), (0, 255, 0), 2)
                     label = f"{pred['class']} ({pred['confidence']:.2f})"
                     (lw, lh), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 2)
-                    cv2.rectangle(image_cv2, (x1, y1-lh-10), (x1+lw, y1), (0,255,0), -1)
-                    cv2.putText(image_cv2, label, (x1, y1-5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,0,0), 1)
-                
+                    cv2.rectangle(image_cv2, (x1, y1 - lh - 10), (x1 + lw, y1), (0, 255, 0), -1)
+                    cv2.putText(image_cv2, label, (x1, y1 - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1)
+
                 annotated_image_rgb = cv2.cvtColor(image_cv2, cv2.COLOR_BGR2RGB)
 
                 st.session_state.analysis_results = {
@@ -168,38 +168,52 @@ with col_right:
         with st.form("save_form"):
             recorder_name = st.text_input("ชื่อผู้บันทึก")
             notes = st.text_area("หมายเหตุ (ถ้ามี)")
-            prepare_button = st.form_submit_button("สร้างไฟล์ Excel สำหรับดาวน์โหลด")
+            save_button = st.form_submit_button("บันทึกและสร้างไฟล์ดาวน์โหลด")
 
-            if prepare_button:
+            if save_button:
                 if not recorder_name.strip():
                     st.warning("กรุณากรอกชื่อผู้บันทึก")
                 else:
-                    bkk_timezone = timezone(timedelta(hours=7))
-                    time_in_bkk = datetime.now(bkk_timezone)
-                    
-                    record_data = {
-                        "วันที่ตรวจ": st.session_state.inspection_date.strftime("%Y-%m-%d"),
-                        "โรงงาน": st.session_state.factory,
-                        "หน่วยงาน/แผนก": st.session_state.department,
-                        "พื้นที่ติดตั้ง": st.session_state.location,
-                        "จำนวนแมลงทั้งหมด": results.get("total_insects", 0),
-                        "ผู้บันทึก": recorder_name,
-                        "หมายเหตุ": notes,
-                        "เวลาที่บันทึก": time_in_bkk.strftime("%Y-%m-%d %H:%M:%S")
-                    }
-                    df_to_save = pd.DataFrame([record_data])
-                    
-                    output = io.BytesIO()
-                    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-                        df_to_save.to_excel(writer, index=False, sheet_name='AnalysisResult')
-                    
-                    st.session_state.excel_data_to_download = output.getvalue()
-                    st.session_state.excel_filename = f"insect_report_{st.session_state.factory}_{time_in_bkk.strftime('%Y%m%d')}.xlsx"
-                    st.rerun()
+                    try:
+                        bkk_timezone = timezone(timedelta(hours=7))
+                        time_in_bkk = datetime.now(bkk_timezone)
+                        
+                        new_record_data = {
+                            "วันที่ตรวจ": st.session_state.inspection_date.strftime("%Y-%m-%d"),
+                            "เวลาที่บันทึก": time_in_bkk.strftime("%H:%M:%S"),
+                            "โรงงาน": st.session_state.factory,
+                            "หน่วยงาน/แผนก": st.session_state.department,
+                            "พื้นที่ติดตั้ง": st.session_state.location,
+                            "จำนวนแมลงทั้งหมด": results.get("total_insects", 0),
+                            "ผู้บันทึก": recorder_name,
+                            "หมายเหตุ": notes
+                        }
+                        df_new = pd.DataFrame([new_record_data])
+
+                        if os.path.exists(EXCEL_FILENAME):
+                            df_existing = pd.read_excel(EXCEL_FILENAME, engine='openpyxl')
+                            df_combined = pd.concat([df_existing, df_new], ignore_index=True)
+                        else:
+                            df_combined = df_new
+                        
+                        df_combined.to_excel(EXCEL_FILENAME, index=False)
+                        st.success("✅ บันทึกข้อมูลลงไฟล์หลักเรียบร้อยแล้ว!")
+
+                      
+                        output = io.BytesIO()
+                        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+                            df_combined.to_excel(writer, index=False, sheet_name='AnalysisHistory')
+                        
+                        st.session_state.excel_data_to_download = output.getvalue()
+                        st.session_state.excel_filename = EXCEL_FILENAME
+                        st.rerun()
+
+                    except Exception as e:
+                        st.error(f"เกิดข้อผิดพลาดในการบันทึก/สร้างไฟล์: {e}")
 
         if st.session_state.get("excel_data_to_download"):
             st.download_button(
-                label="📥 คลิกที่นี่เพื่อดาวน์โหลดไฟล์ Excel",
+                label="📥 คลิกที่นี่เพื่อดาวน์โหลดไฟล์ Excel ล่าสุด",
                 data=st.session_state.excel_data_to_download,
                 file_name=st.session_state.excel_filename,
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
