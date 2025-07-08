@@ -1,48 +1,37 @@
 import streamlit as st
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from PIL import Image
 import numpy as np
 import cv2
 import os
 from roboflow import Roboflow
+import pandas as pd
+import io
 
 
-st.set_page_config(page_title="AI Insect Count", layout="wide", page_icon="🦟")
-
-st.markdown(
-    """
-    <div style="
-        background: linear-gradient(to right, #6ab04c, #badc58);
-        border-radius: 12px;
-        padding: 10px 0;
-        text-align: center;
-        font-size: 28px;
-        font-weight: bold;
-        color: white;
-        margin-bottom: 20px;
-    ">
-        AI Insect Count
-    </div>
-    """,
-    unsafe_allow_html=True
-)
-st.markdown("""
-<style>
-.stSelectbox > div > div, .stDateInput > div > div, .stTextInput > div > div > input {
-    background-color: #f0f8ff !important;
-    border-radius: 8px !important;
+LOCATION_DATA = {
+    "SB": {"บรรจุ": ["ห้องแต่งตัว", "ห้องบรรจุ 1", "ห้องบรรจุ 2", "ห้องบรรจุ 3", "ห้องบรรจุ Auto", "ห้อง Mix SP", "ห้องบรรจุ SP", "ห้องเก็บภาชนะ ชั้น 1", "ห้องเก็บภาชนะ ชั้น 2", "ห้อง Pack SP"]},
+    "MDC": {
+        "LS 1": [f"เครื่องที่ {i}" for i in range(1, 4)], "LS 2": [f"เครื่องที่ {i}" for i in range(1, 3)],
+        "บริการลูกค้า": [f"เครื่องที่ {i}" for i in range(1, 12)], "พัสดุ": ["เครื่องที่ 1"], "คลังสินค้า": ["เครื่องที่ 7"],
+        "Conditioning Silo": [f"เครื่องที่ {i}" for i in range(1, 4)], "SPP": [f"เครื่องที่ {i}" for i in range(1, 13)],
+        "HIT": [f"เครื่องที่ {i}" for i in range(1, 6)], "Rock Sugar": [f"เครื่องที่ {i}" for i in range(1, 5)],
+        "บรรจุ": [f"เครื่องที่ {i}" for i in range(1, 9)], "หม้อปั่นรีไฟน์": ["เครื่องที่ 1"],
+    },
+    "MPK": {
+        "บรรจุ": ["1.ห้องเก็บกระสอบ 50 กก.", "2.ห้องเตรียมกระสอบ 50 กก.", "3.ห้องบรรจุ 50 กก.", "4.ห้องกระสอบ silo", "5.ห้องบรรจุ 1000 กก. Silo", "6.ห้องบรรจุ 1 กก. Silo", "7.ห้องบรรจุแพ็คโถ 5", "8.ห้องกระสอบ White 1000 กก.ใหม่", "9.ห้องบรรจุWhite 1000kg.ใหม่", "18. ห้องบรรจุ Demerara"],
+        "เคี่ยวปั่นรีไฟน์": ["10.ห้องใต้หม้อปั่น", "11.ห้องสายพานห้องล่าง", "12.ห้องสายพานล่าง No.2", "13.ห้องสายพานห้องกลาง", "14.ห้องสายพานห้องบน", "15.ห้องสายพานบน No.2"],
+        "Conditioning Silo": ["16.ห้องตะแกรงคัดเม็ด Nestle", "17.ห้องตะแกรงคัดเม็ด Rotex"]
+    },
+    "MPV": {
+        "บรรจุ": [f"เครื่องที่ {i} บรรจุ" for i in range(1, 13)], "เคี่ยวปั่นรีไฟน์": ["เครื่องที่ 1 เคี่ยวปั่นรีไฟน์"],
+        "Conditioning Silo": ["เครื่องที่ 1 Conditioning Silo"], "ผลิตภัณฑ์พิเศษ": [f"เครื่องที่ {i} ผลิตภัณฑ์พิเศษ" for i in range(1, 5)]
+    },
+    "MKS": {
+        "บรรจุ": ["ILP01 ห้องเปลี่ยนเสื้อผ้าเข้าห้องบรรจุ", "ILP02 ห้อง NCS Auto", "ILP03 ห้องเก็บภาชนะ, ห้อง Auto", "ILP04 ห้องบรรจุน้ำตาล 25/50กก. ยุ้ง 2", "ILP05 ห้องบรรจุน้ำตาล 25/50กก. ยุ้ง 1", "ILP06 ห้องบรรจุน้ำตาล MG 1 กก.", "ILP07 ห้องแพ็คกล่อง MG 1 กก.", "ILP08 ห้องเก็บภาชนะ 25/50 กก.", "ILP09 ห้องเก็บภาชนะหลังห้องบรรจุ", "ILP10 ห้องเปลี่ยนเสื้อผ้าห้องผลิต MG", "ILP11 ห้องเทผลิต MG", "ILP12 ห้องเปลี่ยนเสื้อผ้าห้องเท Auto", "ILP13 ห้องเท Auto"],
+        "หม้อปั่น": ["NO1 ห้องตะแกรงโยก"]
+    }
 }
-div.stButton > button {
-    background-color: #27ae60;
-    color: white;
-    font-weight: bold;
-    border-radius: 25px;
-    padding: 10px 40px;
-    font-size: 18px;
-    width: 100%;
-}
-</style>
-""", unsafe_allow_html=True)
 
 @st.cache_resource
 def load_insect_model():
@@ -57,93 +46,164 @@ def load_insect_model():
         st.error(f"❌ ไม่สามารถเชื่อมต่อ AI ได้: {e}")
         return None
 
+st.set_page_config(page_title="AI Insect Count", layout="wide", page_icon="🦟")
+st.markdown(
+    """
+    <div style="
+        background: linear-gradient(to right, #6ab04c, #badc58);
+        border-radius: 12px; padding: 10px 0; text-align: center;
+        font-size: 28px; font-weight: bold; color: white; margin-bottom: 20px;
+    ">
+        AI Insect Count
+    </div>
+    """,
+    unsafe_allow_html=True
+)
+st.markdown("""
+<style>
+.stSelectbox > div > div, .stDateInput > div > div, .stTextInput > div > div > input, .stTextArea > div > textarea {
+    background-color: #f0f8ff !important; border-radius: 8px !important;
+}
+div.stButton > button, .stForm [data-testid=stFormSubmitButton] button {
+    background-color: #27ae60; color: white; font-weight: bold; border-radius: 25px;
+    padding: 10px 40px; font-size: 18px;
+}
+</style>
+""", unsafe_allow_html=True)
+
 model = load_insect_model()
-if 'analysis_results' not in st.session_state:
-    st.session_state.analysis_results = None
+keys_to_init = {
+    'analysis_results': None, 'factory': "", 'department': "", 'location': "", 
+    'inspection_date': datetime.now(timezone(timedelta(hours=7))).date(),
+    'excel_data_to_download': None, 'excel_filename': ""
+}
+for key, value in keys_to_init.items():
+    if key not in st.session_state:
+        st.session_state[key] = value
 
-
-col_left, col_right = st.columns([1, 1.5])
+col_left, col_right = st.columns([1, 1.2])
 
 with col_left:
     st.subheader("กรอกข้อมูลการตรวจ")
     
-    factory = st.selectbox(
-        "โรงงาน",
-        ["", "SB", "MDC", "MPK", "MPV", "MKS"],
-        help="เลือกโรงงานที่ทำการตรวจ"
-    )
-    inspection_date = st.date_input("วันที่ตรวจ", datetime.today())
-    department = st.text_input("หน่วยงาน/แผนก")
-    location = st.text_input("พื้นที่ติดตั้ง")
+    def on_factory_change(): st.session_state.department = ""; st.session_state.location = ""
+    st.selectbox("โรงงาน", [""] + sorted(LOCATION_DATA.keys()), key='factory', on_change=on_factory_change)
+
+    def on_department_change(): st.session_state.location = ""
+    department_list = [""] + sorted(LOCATION_DATA[st.session_state.factory].keys()) if st.session_state.factory else [""]
+    st.selectbox("หน่วยงาน/แผนก", department_list, key='department', on_change=on_department_change, disabled=not st.session_state.factory)
+
+    location_list = [""] + sorted(LOCATION_DATA[st.session_state.factory][st.session_state.department]) if st.session_state.factory and st.session_state.department else [""]
+    st.selectbox("พื้นที่ติดตั้ง", location_list, key='location', disabled=not st.session_state.department)
     
-    st.subheader("อัปโหลดรูปภาพ")
-    source_option = st.radio("เลือกแหล่งที่มาของรูป:", ["อัปโหลดไฟล์", "ถ่ายภาพจากกล้อง"], horizontal=True)
-
-    uploaded_image = None
-    if source_option == "อัปโหลดไฟล์":
-        uploaded_image = st.file_uploader("เลือกไฟล์รูปภาพ...", type=["jpg", "jpeg", "png"], label_visibility="collapsed")
-    else:
-        uploaded_image = st.camera_input("ถ่ายภาพโดยตรง", label_visibility="collapsed")
-
-    if st.button("Analysis"):
-        if uploaded_image is None:
-            st.warning("⚠️ กรุณาอัปโหลดหรือถ่ายภาพก่อน")
-        elif not model:
-            st.error("❌ โมเดล AI ยังไม่พร้อมใช้งาน")
+    st.date_input("วันที่ตรวจ", key='inspection_date')
+    
+    with st.form("analysis_form", clear_on_submit=True):
+        st.subheader("อัปโหลดรูปภาพ")
+        source_option = st.radio("เลือกแหล่งที่มาของรูป:", ["อัปโหลดไฟล์", "ถ่ายภาพจากกล้อง"], horizontal=True)
+        uploaded_image = None
+        if source_option == "อัปโหลดไฟล์":
+            uploaded_image = st.file_uploader("เลือกไฟล์...", type=["jpg", "jpeg", "png"], label_visibility="collapsed")
         else:
-            try:
-                with st.spinner("🧠 กำลังวิเคราะห์ภาพ..."):
-                    image_pil = Image.open(uploaded_image).convert("RGB")
-                    
-                    temp_path = "temp_insect_image.jpg"
-                    image_pil.save(temp_path)
-                    
-                    results_json = model.predict(temp_path, confidence=40, overlap=30).json()
-                    os.remove(temp_path) 
-                    
-                    predictions = results_json.get('predictions', [])
-                    
-                    image_cv2 = cv2.cvtColor(np.array(image_pil), cv2.COLOR_RGB2BGR)
-                    for pred in predictions:
-                        x, y, w, h = int(pred['x']), int(pred['y']), int(pred['width']), int(pred['height'])
-                        x1, y1 = x - w // 2, y - h // 2
-                        x2, y2 = x + w // 2, y + h // 2
-                        
-                        cv2.rectangle(image_cv2, (x1, y1), (x2, y2), (0, 255, 0), 2)
-                        label = f"{pred['class']} ({pred['confidence']:.2f})"
-                        (lw, lh), base = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 2)
-                        cv2.rectangle(image_cv2, (x1, y1 - lh - 10), (x1 + lw, y1), (0, 255, 0), -1)
-                        cv2.putText(image_cv2, label, (x1, y1 - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1)
+            uploaded_image = st.camera_input("ถ่ายภาพ", label_visibility="collapsed")
+        
+        analysis_button = st.form_submit_button("Analysis", use_container_width=True)
 
-                    annotated_image_rgb = cv2.cvtColor(image_cv2, cv2.COLOR_BGR2RGB)
+if analysis_button:
+    st.session_state.analysis_results = None
+    st.session_state.excel_data_to_download = None 
 
-                    st.session_state.analysis_results = {
-                        "total_insects": len(predictions),
-                        "annotated_image": annotated_image_rgb,
-                        "original_image": image_pil
-                    }
+    if not all([st.session_state.factory, st.session_state.department, st.session_state.location]):
+        st.warning("⚠️ กรุณากรอกข้อมูล โรงงาน, หน่วยงาน, และพื้นที่ติดตั้งให้ครบถ้วน")
+    elif uploaded_image is None:
+        st.warning("⚠️ กรุณาอัปโหลดหรือถ่ายภาพก่อน")
+    elif not model:
+        st.error("❌ โมเดล AI ยังไม่พร้อมใช้งาน")
+    else:
+        try:
+            with st.spinner("🧠 กำลังวิเคราะห์ภาพ..."):
+                image_pil = Image.open(uploaded_image).convert("RGB")
+                temp_path = "temp_insect_image.jpg"
+                image_pil.save(temp_path)
                 
-                st.success("✅ วิเคราะห์สำเร็จ!")
-                st.rerun()
+                results_json = model.predict(temp_path, confidence=40, overlap=30).json()
+                os.remove(temp_path) 
+                
+                predictions = results_json.get('predictions', [])
+                
+                image_cv2 = cv2.cvtColor(np.array(image_pil), cv2.COLOR_RGB2BGR)
+                for pred in predictions:
+                    x, y, w, h = int(pred['x']), int(pred['y']), int(pred['width']), int(pred['height'])
+                    x1, y1, x2, y2 = x-w//2, y-h//2, x+w//2, y+h//2
+                    cv2.rectangle(image_cv2, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                    label = f"{pred['class']} ({pred['confidence']:.2f})"
+                    (lw, lh), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 2)
+                    cv2.rectangle(image_cv2, (x1, y1-lh-10), (x1+lw, y1), (0,255,0), -1)
+                    cv2.putText(image_cv2, label, (x1, y1-5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,0,0), 1)
+                
+                annotated_image_rgb = cv2.cvtColor(image_cv2, cv2.COLOR_BGR2RGB)
 
-            except Exception as e:
-                st.error("😭 เกิดข้อผิดพลาดร้ายแรงระหว่างการประมวลผล!")
-                st.exception(e)
+                st.session_state.analysis_results = {
+                    "total_insects": len(predictions),
+                    "annotated_image": annotated_image_rgb,
+                }
+            st.success("✅ วิเคราะห์สำเร็จ!")
+        except Exception as e:
+            st.error("😭 เกิดข้อผิดพลาดร้ายแรง!")
+            st.exception(e)
 
 with col_right:
     st.subheader("ผลการวิเคราะห์")
-    
     results = st.session_state.get('analysis_results')
 
     if results:
         st.metric("จำนวนแมลงทั้งหมด (Total Insects)", f"{results.get('total_insects', 0)} ตัว")
         st.markdown("---")
-        st.markdown("#### รูปกระดานกาวที่ Label (Picture Label)")
+        st.markdown("#### รูปภาพที่ Label แล้ว (Picture Label)")
         st.image(results.get("annotated_image"), use_container_width=True)
-    else:
-        st.info("อัปโหลดหรือถ่ายภาพ จากนั้นกดปุ่ม 'Analysis' เพื่อดูผลลัพธ์ที่นี่")
 
-        placeholder_image = np.full((400, 600, 3), 240, dtype=np.uint8)
-        cv2.putText(placeholder_image, "Analysis Result Here", (100, 200), 
-                    cv2.FONT_HERSHEY_SIMPLEX, 1, (180, 180, 180), 2)
-        st.image(placeholder_image, use_container_width=True)
+        st.markdown("---")
+        st.subheader("📝 บันทึกและดาวน์โหลดผล")
+        
+        with st.form("save_form"):
+            recorder_name = st.text_input("ชื่อผู้บันทึก")
+            notes = st.text_area("หมายเหตุ (ถ้ามี)")
+            prepare_button = st.form_submit_button("สร้างไฟล์ Excel สำหรับดาวน์โหลด")
+
+            if prepare_button:
+                if not recorder_name.strip():
+                    st.warning("กรุณากรอกชื่อผู้บันทึก")
+                else:
+                    bkk_timezone = timezone(timedelta(hours=7))
+                    time_in_bkk = datetime.now(bkk_timezone)
+                    
+                    record_data = {
+                        "วันที่ตรวจ": st.session_state.inspection_date.strftime("%Y-%m-%d"),
+                        "โรงงาน": st.session_state.factory,
+                        "หน่วยงาน/แผนก": st.session_state.department,
+                        "พื้นที่ติดตั้ง": st.session_state.location,
+                        "จำนวนแมลงทั้งหมด": results.get("total_insects", 0),
+                        "ผู้บันทึก": recorder_name,
+                        "หมายเหตุ": notes,
+                        "เวลาที่บันทึก": time_in_bkk.strftime("%Y-%m-%d %H:%M:%S")
+                    }
+                    df_to_save = pd.DataFrame([record_data])
+                    
+                    output = io.BytesIO()
+                    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+                        df_to_save.to_excel(writer, index=False, sheet_name='AnalysisResult')
+                    
+                    st.session_state.excel_data_to_download = output.getvalue()
+                    st.session_state.excel_filename = f"insect_report_{st.session_state.factory}_{time_in_bkk.strftime('%Y%m%d')}.xlsx"
+                    st.rerun()
+
+        if st.session_state.get("excel_data_to_download"):
+            st.download_button(
+                label="📥 คลิกที่นี่เพื่อดาวน์โหลดไฟล์ Excel",
+                data=st.session_state.excel_data_to_download,
+                file_name=st.session_state.excel_filename,
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+    else:
+        with st.container(border=True, height=500):
+             st.info("กรอกข้อมูลและอัปโหลดรูปภาพ จากนั้นกดปุ่ม 'Analysis' เพื่อดูผลลัพธ์")
