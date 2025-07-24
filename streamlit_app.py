@@ -41,7 +41,7 @@ def load_insect_model():
         API_KEY = "3ZQFofNJkviVJdyAb4mG"
         rf = Roboflow(api_key=API_KEY)
         project = rf.workspace("aiinsect").project("ai-insect")
-        model = project.version(1).model
+        model = project.version(3).model
         return model
     except Exception as e:
         st.error(f"❌ ไม่สามารถเชื่อมต่อ AI ได้: {e}")
